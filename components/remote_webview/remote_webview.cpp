@@ -535,6 +535,15 @@ void RemoteWebViewTouchListener::update(const touchscreen::TouchPoints_t &pts) {
 
   const uint64_t now = esp_timer_get_time();
   for (auto &p : pts) {
+    // FIX: Afvis touch-koordinater uden for display-grænser.
+    // Forhindrer Store access fault crash på ESP32-P4 + GT911
+    // når brugeren rører skærmens kanter eller hjørner.
+    if (p.x < 0 || p.x >= parent_->display_width_ ||
+        p.y < 0 || p.y >= parent_->display_height_) {
+      ESP_LOGW(TAG, "touch out of bounds: %d,%d (display %dx%d)",
+               p.x, p.y, parent_->display_width_, parent_->display_height_);
+      continue;
+    }
     switch (p.state) {
       case touchscreen::STATE_PRESSED:
         parent_->ws_send_touch_event_(proto::TouchType::Down, p.x, p.y, p.id);
@@ -563,6 +572,15 @@ void RemoteWebViewTouchListener::release() {
 
 void RemoteWebViewTouchListener::touch(touchscreen::TouchPoint tp) {
   if (!parent_) return;
+
+  // FIX: Afvis touch-koordinater uden for display-grænser.
+  // Forhindrer Store access fault crash på ESP32-P4 + GT911.
+  if (tp.x < 0 || tp.x >= parent_->display_width_ ||
+      tp.y < 0 || tp.y >= parent_->display_height_) {
+    ESP_LOGW(TAG, "touch out of bounds: %d,%d (display %dx%d)",
+             tp.x, tp.y, parent_->display_width_, parent_->display_height_);
+    return;
+  }
   
   parent_->ws_send_touch_event_(proto::TouchType::Down, tp.x, tp.y, tp.id);
 }
