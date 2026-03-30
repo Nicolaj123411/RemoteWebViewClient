@@ -55,21 +55,21 @@ void RemoteWebView::setup() {
   if (jpeg_new_decoder_engine(&jcfg, &hw_dec_) != ESP_OK) {
     hw_dec_ = nullptr;
   }
-  
+
   if (hw_dec_) {
     const int W = display_->get_width();
     const int H = display_->get_height();
     const int aligned_w = (W + 15) & ~15;
     const int aligned_h = (H + 15) & ~15;
-    
+
     const size_t max_buffer_size = (size_t)aligned_w * (size_t)aligned_h * 2u;
-    
+
     jpeg_decode_memory_alloc_cfg_t in_cfg { .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER };
     jpeg_decode_memory_alloc_cfg_t out_cfg { .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER };
-    
+
     hw_decode_input_buf_ = (uint8_t*)jpeg_alloc_decoder_mem((uint32_t)max_buffer_size, &in_cfg, &hw_decode_input_size_);
     hw_decode_output_buf_ = (uint8_t*)jpeg_alloc_decoder_mem((uint32_t)max_buffer_size, &out_cfg, &hw_decode_output_size_);
-    
+
     if (!hw_decode_input_buf_ || !hw_decode_output_buf_) {
       ESP_LOGE(TAG, "Failed to allocate HW decoder buffers");
       if (hw_decode_input_buf_) free(hw_decode_input_buf_);
@@ -79,7 +79,7 @@ void RemoteWebView::setup() {
       jpeg_del_decoder_engine(hw_dec_);
       hw_dec_ = nullptr;
     } else {
-      ESP_LOGD(TAG, "HW decoder buffers allocated: input=%u, output=%u", 
+      ESP_LOGD(TAG, "HW decoder buffers allocated: input=%u, output=%u",
                (unsigned)hw_decode_input_size_, (unsigned)hw_decode_output_size_);
     }
   }
@@ -126,16 +126,16 @@ void RemoteWebView::dump_config() {
 
 bool RemoteWebView::open_url(const std::string &s) {
   if (s.empty()) return false;
-  
+
   if (!ws_client_ || !esp_websocket_client_is_connected(ws_client_))
     return false;
-  
+
   if (ws_send_open_url_(s.c_str(), 0)) {
     url_ = s;
     ESP_LOGD(TAG, "opened URL: %s", s.c_str());
     return true;
   }
-  
+
   return false;
 }
 
@@ -194,7 +194,7 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
     case WEBSOCKET_EVENT_CONNECTED:
       if (self_) self_->ws_client_ = e->client;
       ESP_LOGI(TAG, "[ws] connected");
-      
+
       if (self_) self_->last_keepalive_us_ = esp_timer_get_time();
       if (self_ && !self_->url_.empty()) {
         self_->ws_send_open_url_(self_->url_.c_str(), 0);
@@ -204,7 +204,7 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
     case WEBSOCKET_EVENT_DISCONNECTED:
       if (self_) self_->ws_client_ = nullptr;
       ESP_LOGI(TAG, "[ws] disconnected");
-      if (self_) self_->last_keepalive_us_ = 0; 
+      if (self_) self_->last_keepalive_us_ = 0;
       reasm_reset_(*r);
       websocket_force_reconnect(e->client);
       break;
@@ -213,7 +213,7 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
     case WEBSOCKET_EVENT_CLOSED:
       if (self_) self_->ws_client_ = nullptr;
       ESP_LOGI(TAG, "[ws] closed");
-      if (self_) self_->last_keepalive_us_ = 0; 
+      if (self_) self_->last_keepalive_us_ = 0;
       reasm_reset_(*r);
       websocket_force_reconnect(e->client);
       break;
@@ -224,13 +224,13 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
 
       const uint8_t *frag = (const uint8_t *)e->data_ptr;
       size_t frag_len = (size_t)e->data_len;
-      bool is_bin  = (e->op_code == WS_TRANSPORT_OPCODES_BINARY);
+      bool is_bin = (e->op_code == WS_TRANSPORT_OPCODES_BINARY);
       if (!is_bin) break;
 
       if (e->payload_offset == 0) {
         reasm_reset_(*r);
-        const size_t max_allowed = (self_ && self_->max_bytes_per_msg_ > 0) 
-                                   ? (size_t)self_->max_bytes_per_msg_ 
+        const size_t max_allowed = (self_ && self_->max_bytes_per_msg_ > 0)
+                                   ? (size_t)self_->max_bytes_per_msg_
                                    : cfg::ws_max_message_bytes;
         if ((size_t)e->payload_len > max_allowed) {
           ESP_LOGE(TAG, "WS message too large: %u > %u", (unsigned)e->payload_len, (unsigned)max_allowed);
@@ -307,8 +307,7 @@ void RemoteWebView::process_packet_(void * /*client*/, const uint8_t *data, size
   }
 }
 
-void RemoteWebView::process_frame_packet_(const uint8_t *data, size_t len)
-{
+void RemoteWebView::process_frame_packet_(const uint8_t *data, size_t len) {
   if (!data || len < sizeof(proto::FrameHeader)) return;
 
   proto::FrameInfo fi{};
@@ -317,8 +316,8 @@ void RemoteWebView::process_frame_packet_(const uint8_t *data, size_t len)
 
   if (fi.frame_id != frame_id_) {
     frame_id_ = fi.frame_id;
-    frame_tiles_= 0;
-    frame_bytes_= 0;
+    frame_tiles_ = 0;
+    frame_bytes_ = 0;
     frame_start_us_ = esp_timer_get_time();
   }
   frame_bytes_ += len;
@@ -337,7 +336,7 @@ void RemoteWebView::process_frame_packet_(const uint8_t *data, size_t len)
     if (fi.enc == proto::Encoding::JPEG && th.dlen) {
       decode_jpeg_tile_to_lcd_((int16_t)th.x, (int16_t)th.y, data + off, th.dlen);
     }
-    
+
     off += th.dlen;
   }
 
@@ -350,8 +349,7 @@ void RemoteWebView::process_frame_packet_(const uint8_t *data, size_t len)
   }
 }
 
-void RemoteWebView::process_frame_stats_packet_(const uint8_t *data, size_t len)
-{
+void RemoteWebView::process_frame_stats_packet_(const uint8_t *data, size_t len) {
   uint32_t avg_render_time = 0;
   if (frame_stats_count_ > 0)
     avg_render_time = frame_stats_time_ / frame_stats_count_;
@@ -376,26 +374,27 @@ bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const
   if (!data || !len) return false;
 
 #if REMOTE_WEBVIEW_HW_JPEG
+  // Brug kun HW decoder til perfekt aligned tiles (begge dimensioner multiple af 16)
   if (hw_dec_ && hw_decode_input_buf_ && hw_decode_output_buf_) {
     jpeg_decode_picture_info_t hdr{};
     if (jpeg_decoder_get_info(data, (uint32_t)len, &hdr) != ESP_OK || !hdr.width || !hdr.height) {
-      return false;
+      return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
     }
 
     const int actual_w = (int)hdr.width;
     const int actual_h = (int)hdr.height;
     const int aligned_w = (actual_w + 15) & ~15;
     const int aligned_h = (actual_h + 15) & ~15;
-    const uint32_t out_sz = (uint32_t)aligned_w * (uint32_t)aligned_h * 2u;
 
-    if (out_sz > hw_decode_output_size_ || len > hw_decode_input_size_) {
-      ESP_LOGW(TAG, "tile too large for HW decoder buffers");
-      return false;
+    // Ikke-aligned tiles: brug software decoder for at undgå DMA2D konflikt
+    if (aligned_w != actual_w || aligned_h != actual_h) {
+      return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
     }
 
-    if (aligned_w != actual_w || aligned_h != actual_h) {
-      ESP_LOGW(TAG, "jpeg dimensions not aligned: %u x %u (padding to %d x %d)",
-               (unsigned)actual_w, (unsigned)actual_h, aligned_w, aligned_h);
+    const uint32_t out_sz = (uint32_t)aligned_w * (uint32_t)aligned_h * 2u;
+    if (out_sz > hw_decode_output_size_ || len > hw_decode_input_size_) {
+      ESP_LOGW(TAG, "tile too large for HW decoder buffers");
+      return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
     }
 
     jpeg_decode_cfg_t jcfg{};
@@ -412,39 +411,22 @@ bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const
                                         &written);
 
     if (dr != ESP_OK) {
-      ESP_LOGW(TAG, "HW decode failed (err=%d), skipping tile", dr);
-      return false;
+      ESP_LOGW(TAG, "HW decode failed (err=%d), falling back to SW", dr);
+      return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
     }
 
-    // HW decoder output er aligned_w bredt — tegn kun actual_w kolonner per række
-    // ved at kalde draw_pixels_at én gang per række hvis bredden er paddet,
-    // ellers tegn hele blokken på én gang.
-    if (aligned_w == actual_w) {
-      // Ingen padding i bredden — men højde kan være paddet, tegn kun actual_h rækker
-      display_->draw_pixels_at(
-          dst_x, dst_y, actual_w, actual_h,
-          hw_decode_output_buf_,
-          esphome::display::COLOR_ORDER_RGB,
-          esphome::display::COLOR_BITNESS_565,
-          rgb565_big_endian_);
-    } else {
-      // Bredden er paddet — tegn række for række for at springe padding over
-      for (int row = 0; row < actual_h; row++) {
-        const uint8_t *row_ptr = hw_decode_output_buf_ + (size_t)row * (size_t)aligned_w * 2u;
-        display_->draw_pixels_at(
-            dst_x, dst_y + row, actual_w, 1,
-            row_ptr,
-            esphome::display::COLOR_ORDER_RGB,
-            esphome::display::COLOR_BITNESS_565,
-            rgb565_big_endian_);
-      }
-    }
+    display_->draw_pixels_at(
+        dst_x, dst_y, actual_w, actual_h,
+        hw_decode_output_buf_,
+        esphome::display::COLOR_ORDER_RGB,
+        esphome::display::COLOR_BITNESS_565,
+        rgb565_big_endian_);
 
     return true;
   }
 #endif  // REMOTE_WEBVIEW_HW_JPEG
 
-  return false;
+  return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
 }
 
 bool RemoteWebView::decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, const uint8_t *data, size_t len) {
@@ -456,13 +438,12 @@ bool RemoteWebView::decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, con
   const int w = jd_.getWidth();
   const int h = jd_.getHeight();
 
-  // Allokér aligned buffer til draw_pixels_at (ESP32-P4 kræver cache-alignment)
+  // Allokér 64-byte aligned buffer — ESP32-P4 kræver dette for draw_pixels_at
   const int aligned_w = (w + 15) & ~15;
   const int aligned_h = (h + 15) & ~15;
   const size_t buf_sz = (size_t)aligned_w * (size_t)aligned_h * 2u;
 
-  sw_decode_buf_ = (uint16_t*)heap_caps_aligned_alloc(64, buf_sz,
-                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  sw_decode_buf_ = (uint16_t*)heap_caps_aligned_alloc(64, buf_sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!sw_decode_buf_)
     sw_decode_buf_ = (uint16_t*)heap_caps_aligned_alloc(64, buf_sz, MALLOC_CAP_8BIT);
 
@@ -471,6 +452,7 @@ bool RemoteWebView::decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, con
     jd_.close();
     return false;
   }
+
   sw_decode_buf_w_ = aligned_w;
   sw_decode_buf_h_ = aligned_h;
   sw_decode_dst_x_ = dst_x;
@@ -491,14 +473,13 @@ bool RemoteWebView::decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, con
   }
   jd_.close();
 
-  // Tegn den aligned buffer til display
+  // Tegn aligned buffer til display — kun de faktiske pixel-dimensioner
   display_->draw_pixels_at(
       dst_x, dst_y, w, h,
       (const uint8_t*)sw_decode_buf_,
       esphome::display::COLOR_ORDER_RGB,
       esphome::display::COLOR_BITNESS_565,
-      rgb565_big_endian_
-  );
+      rgb565_big_endian_);
 
   heap_caps_free(sw_decode_buf_);
   sw_decode_buf_ = nullptr;
@@ -510,7 +491,6 @@ int RemoteWebView::jpeg_draw_cb_s_(JPEGDRAW *p) {
 }
 
 int RemoteWebView::jpeg_draw_cb_(JPEGDRAW *p) {
-  // Skriv pixels til sw_decode_buf_ i stedet for direkte til display
   if (!sw_decode_buf_) return 0;
 
   for (int row = 0; row < p->iHeight; row++) {
@@ -552,25 +532,25 @@ bool RemoteWebView::ws_send_touch_event_(proto::TouchType type, int x, int y, ui
 }
 
 bool RemoteWebView::ws_send_open_url_(const char *url, uint16_t flags) {
-  if (!ws_client_ || !ws_send_mtx_ ||  !url || !esp_websocket_client_is_connected(ws_client_))
+  if (!ws_client_ || !ws_send_mtx_ || !url || !esp_websocket_client_is_connected(ws_client_))
     return false;
 
-  const uint32_t n = (uint32_t) strlen(url);
-  const size_t total = sizeof(proto::OpenURLHeader) + (size_t) n;
-  
+  const uint32_t n = (uint32_t)strlen(url);
+  const size_t total = sizeof(proto::OpenURLHeader) + (size_t)n;
+
   if (total > 16 * 1024) return false;
 
-    auto *pkt = (uint8_t *) heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (!pkt) pkt = (uint8_t *) heap_caps_malloc(total, MALLOC_CAP_8BIT);
+  auto *pkt = (uint8_t *)heap_caps_malloc(total, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!pkt) pkt = (uint8_t *)heap_caps_malloc(total, MALLOC_CAP_8BIT);
   if (!pkt) return false;
 
   const size_t written = proto::build_open_url_packet(url, flags, pkt, total);
   bool ok = false;
   if (written) {
     if (xSemaphoreTake(ws_send_mtx_, pdMS_TO_TICKS(50)) == pdTRUE) {
-      const int r = esp_websocket_client_send_bin(ws_client_, (const char *) pkt, (int) written, pdMS_TO_TICKS(200));
+      const int r = esp_websocket_client_send_bin(ws_client_, (const char *)pkt, (int)written, pdMS_TO_TICKS(200));
       xSemaphoreGive(ws_send_mtx_);
-      ok = (r == (int) written);
+      ok = (r == (int)written);
     }
   }
   free(pkt);
@@ -599,9 +579,6 @@ void RemoteWebViewTouchListener::update(const touchscreen::TouchPoints_t &pts) {
 
   const uint64_t now = esp_timer_get_time();
   for (auto &p : pts) {
-    // FIX: Afvis touch-koordinater uden for display-grænser.
-    // Forhindrer Store access fault crash på ESP32-P4 + GT911
-    // når brugeren rører skærmens kanter eller hjørner.
     if (p.x < 0 || p.x >= parent_->display_width_ ||
         p.y < 0 || p.y >= parent_->display_height_) {
       ESP_LOGW(TAG, "touch out of bounds: %d,%d (display %dx%d)",
@@ -630,22 +607,19 @@ void RemoteWebViewTouchListener::update(const touchscreen::TouchPoints_t &pts) {
 
 void RemoteWebViewTouchListener::release() {
   if (!parent_) return;
-  
   parent_->ws_send_touch_event_(proto::TouchType::Up, 0, 0, 0);
 }
 
 void RemoteWebViewTouchListener::touch(touchscreen::TouchPoint tp) {
   if (!parent_) return;
 
-  // FIX: Afvis touch-koordinater uden for display-grænser.
-  // Forhindrer Store access fault crash på ESP32-P4 + GT911.
   if (tp.x < 0 || tp.x >= parent_->display_width_ ||
       tp.y < 0 || tp.y >= parent_->display_height_) {
     ESP_LOGW(TAG, "touch out of bounds: %d,%d (display %dx%d)",
              tp.x, tp.y, parent_->display_width_, parent_->display_height_);
     return;
   }
-  
+
   parent_->ws_send_touch_event_(proto::TouchType::Down, tp.x, tp.y, tp.id);
 }
 
@@ -681,7 +655,6 @@ void RemoteWebView::append_q_float_(std::string &s, const char *k, float v) {
   if (v < 0.0f) return;
   s += (s.find('?') == std::string::npos) ? '?' : '&';
   char buf[32];
-  
   snprintf(buf, sizeof(buf), "%s=%.2f", k, (double)v);
   s += buf;
 }
@@ -697,23 +670,15 @@ std::string RemoteWebView::resolve_device_id_() const {
 
   uint8_t mac[6] = {0};
   esp_err_t err = ESP_FAIL;
-  
+
 #if ESP_IDF_VERSION_MAJOR >= 5
   err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
-  if (err != ESP_OK) {
-    err = esp_read_mac(mac, ESP_MAC_BT);
-  }
-  if (err != ESP_OK) {
-    err = esp_read_mac(mac, ESP_MAC_ETH);
-  }
-  if (err != ESP_OK) {
-    err = esp_efuse_mac_get_default(mac);
-  }
+  if (err != ESP_OK) err = esp_read_mac(mac, ESP_MAC_BT);
+  if (err != ESP_OK) err = esp_read_mac(mac, ESP_MAC_ETH);
+  if (err != ESP_OK) err = esp_efuse_mac_get_default(mac);
 #else
   err = esp_efuse_mac_get_default(mac);
-  if (err != ESP_OK) {
-    err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
-  }
+  if (err != ESP_OK) err = esp_read_mac(mac, ESP_MAC_WIFI_STA);
 #endif
 
   if (err != ESP_OK) {
