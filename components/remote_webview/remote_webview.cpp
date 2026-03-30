@@ -473,13 +473,15 @@ bool RemoteWebView::decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, con
   }
   jd_.close();
 
-  // Tegn aligned buffer til display — kun de faktiske pixel-dimensioner
-  display_->draw_pixels_at(
-      dst_x, dst_y, w, h,
-      (const uint8_t*)sw_decode_buf_,
-      esphome::display::COLOR_ORDER_RGB,
-      esphome::display::COLOR_BITNESS_565,
-      rgb565_big_endian_);
+    // Tegn række for række — springer aligned stride padding over
+  for (int row = 0; row < h; row++) {
+    display_->draw_pixels_at(
+        dst_x, dst_y + row, w, 1,
+        (const uint8_t*)(&sw_decode_buf_[row * aligned_w]),
+        esphome::display::COLOR_ORDER_RGB,
+        esphome::display::COLOR_BITNESS_565,
+        rgb565_big_endian_);
+  }
 
   heap_caps_free(sw_decode_buf_);
   sw_decode_buf_ = nullptr;
