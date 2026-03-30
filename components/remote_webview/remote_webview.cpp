@@ -435,6 +435,31 @@ bool RemoteWebView::decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, con
     return false;
   }
 
+  const int w = jd_.getWidth();
+  const int h = jd_.getHeight();
+
+  // Allokér aligned buffer til draw_pixels_at (ESP32-P4 kræver cache-alignment)
+  const int aligned_w = (w + 15) & ~15;
+  const int aligned_h = (h + 15) & ~15;
+  const size_t buf_sz = (size_t)aligned_w * (size_t)aligned_h * 2u;
+
+  sw_decode_buf_ = (uint16_t*)heap_caps_aligned_alloc(64, buf_sz,
+                      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!sw_decode_buf_)
+    sw_decode_buf_ = (uint16_t*)heap_caps_aligned_alloc(64, buf_sz, MALLOC_CAP_8BIT);
+
+  if (!sw_decode_buf_) {
+    ESP_LOGE(TAG, "sw decode buf alloc failed (%u bytes)", (unsigned)buf_sz);
+    jd_.close();
+    return false;
+  }
+  sw_decode_buf_w_ = aligned_w;
+  sw_decode_buf_h_ = aligned_h;
+  sw_decode_dst_x_ = dst_x;
+  sw_decode_dst_y_ = dst_y;
+
+  memset(sw_decode_buf_, 0, buf_sz);
+
   jd_.setMaxOutputSize(8 * 2048);
   jd_.setPixelType(rgb565_big_endian_ ? RGB565_BIG_ENDIAN : RGB565_LITTLE_ENDIAN);
 
@@ -442,9 +467,23 @@ bool RemoteWebView::decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, con
   if (rc == 0) {
     ESP_LOGE(TAG, "decode rc=%d err=%d", rc, jd_.getLastError());
     jd_.close();
+    heap_caps_free(sw_decode_buf_);
+    sw_decode_buf_ = nullptr;
     return false;
   }
   jd_.close();
+
+  // Tegn den aligned buffer til display
+  display_->draw_pixels_at(
+      dst_x, dst_y, w, h,
+      (const uint8_t*)sw_decode_buf_,
+      esphome::display::COLOR_ORDER_RGB,
+      esphome::display::COLOR_BITNESS_565,
+      rgb565_big_endian_
+  );
+
+  heap_caps_free(sw_decode_buf_);
+  sw_decode_buf_ = nullptr;
   return true;
 }
 
@@ -453,21 +492,22 @@ int RemoteWebView::jpeg_draw_cb_s_(JPEGDRAW *p) {
 }
 
 int RemoteWebView::jpeg_draw_cb_(JPEGDRAW *p) {
-  int32_t x = p->x, y = p->y, w = p->iWidth, h = p->iHeight;
-  
-  if (x >= display_width_ || y >= display_height_) return 1;
-  if (x + w > display_width_) w = display_width_ - x;
-  if (y + h > display_height_) h = display_height_ - y;
-  if (w <= 0 || h <= 0) return 1;
+  // Skriv pixels til sw_decode_buf_ i stedet for direkte til display
+  if (!sw_decode_buf_) return 0;
 
-  display_->draw_pixels_at(
-      x, y, w, h,
-      (const uint8_t *)p->pPixels,
-      esphome::display::COLOR_ORDER_RGB,
-      esphome::display::COLOR_BITNESS_565,
-      rgb565_big_endian_
-  );
+  for (int row = 0; row < p->iHeight; row++) {
+    const int abs_y = p->y + row;
+    const int rel_y = abs_y - sw_decode_dst_y_;
+    if (rel_y < 0 || rel_y >= sw_decode_buf_h_) continue;
 
+    for (int col = 0; col < p->iWidth; col++) {
+      const int abs_x = p->x + col;
+      const int rel_x = abs_x - sw_decode_dst_x_;
+      if (rel_x < 0 || rel_x >= sw_decode_buf_w_) continue;
+
+      sw_decode_buf_[rel_y * sw_decode_buf_w_ + rel_x] = p->pPixels[row * p->iWidth + col];
+    }
+  }
   return 1;
 }
 
