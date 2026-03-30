@@ -386,8 +386,14 @@ bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const
     const int aligned_h = (hdr.height + 15) & ~15;
     const uint32_t out_sz = (uint32_t)aligned_w * (uint32_t)aligned_h * 2u;
 
-    if (aligned_w != (int)hdr.width) {
+    if (aligned_w != (int)hdr.width || aligned_h != (int)hdr.height) {
       ESP_LOGW(TAG, "jpeg dimensions not aligned: %u x %u", (unsigned)hdr.width, (unsigned)hdr.height);
+      // FIX: tjek at JPEG dimensioner passer inden for display-bufferen
+      // Hvis JPEG er roteret i forhold til display, kan vi ikke tegne det
+      if ((int)hdr.width > display_width_ || (int)hdr.height > display_height_) {
+        ESP_LOGW(TAG, "jpeg exceeds display buffer, skipping tile");
+        return false;
+      }
       return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
     }
     
