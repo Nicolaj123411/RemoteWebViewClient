@@ -379,21 +379,23 @@ bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const
   if (hw_dec_ && hw_decode_input_buf_ && hw_decode_output_buf_) {
     jpeg_decode_picture_info_t hdr{};
     if (jpeg_decoder_get_info(data, (uint32_t)len, &hdr) != ESP_OK || !hdr.width || !hdr.height) {
-      return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
-    }
-
-    const int aligned_w = (hdr.width  + 15) & ~15;
-    const int aligned_h = (hdr.height + 15) & ~15;
-    const uint32_t out_sz = (uint32_t)aligned_w * (uint32_t)aligned_h * 2u;
-
-   if (aligned_w != (int)hdr.width || aligned_h != (int)hdr.height) {
-      ESP_LOGW(TAG, "jpeg dimensions not aligned: %u x %u", (unsigned)hdr.width, (unsigned)hdr.height);
       return false;
     }
-    
-    if (len > hw_decode_input_size_ || out_sz > hw_decode_output_size_) {
+
+    const int actual_w = (int)hdr.width;
+    const int actual_h = (int)hdr.height;
+    const int aligned_w = (actual_w + 15) & ~15;
+    const int aligned_h = (actual_h + 15) & ~15;
+    const uint32_t out_sz = (uint32_t)aligned_w * (uint32_t)aligned_h * 2u;
+
+    if (out_sz > hw_decode_output_size_ || len > hw_decode_input_size_) {
       ESP_LOGW(TAG, "tile too large for HW decoder buffers");
-      return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
+      return false;
+    }
+
+    if (aligned_w != actual_w || aligned_h != actual_h) {
+      ESP_LOGW(TAG, "jpeg dimensions not aligned: %u x %u (padding to %d x %d)",
+               (unsigned)actual_w, (unsigned)actual_h, aligned_w, aligned_h);
     }
 
     jpeg_decode_cfg_t jcfg{};
@@ -402,25 +404,47 @@ bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const
     jcfg.conv_std      = JPEG_YUV_RGB_CONV_STD_BT709;
 
     memcpy(hw_decode_input_buf_, data, len);
-    
+
     uint32_t written = 0;
-    esp_err_t dr = jpeg_decoder_process(hw_dec_, &jcfg, hw_decode_input_buf_, (uint32_t)len, 
-                                        hw_decode_output_buf_, (uint32_t)hw_decode_output_size_, &written);
+    esp_err_t dr = jpeg_decoder_process(hw_dec_, &jcfg,
+                                        hw_decode_input_buf_, (uint32_t)len,
+                                        hw_decode_output_buf_, (uint32_t)hw_decode_output_size_,
+                                        &written);
 
     if (dr != ESP_OK) {
-      return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
+      ESP_LOGW(TAG, "HW decode failed (err=%d), skipping tile", dr);
+      return false;
     }
 
-    display_->draw_pixels_at(dst_x, dst_y, (int)hdr.width, (int)hdr.height, hw_decode_output_buf_,
-        esphome::display::COLOR_ORDER_RGB,
-        esphome::display::COLOR_BITNESS_565,
-        rgb565_big_endian_);
+    // HW decoder output er aligned_w bredt — tegn kun actual_w kolonner per række
+    // ved at kalde draw_pixels_at én gang per række hvis bredden er paddet,
+    // ellers tegn hele blokken på én gang.
+    if (aligned_w == actual_w) {
+      // Ingen padding i bredden — men højde kan være paddet, tegn kun actual_h rækker
+      display_->draw_pixels_at(
+          dst_x, dst_y, actual_w, actual_h,
+          hw_decode_output_buf_,
+          esphome::display::COLOR_ORDER_RGB,
+          esphome::display::COLOR_BITNESS_565,
+          rgb565_big_endian_);
+    } else {
+      // Bredden er paddet — tegn række for række for at springe padding over
+      for (int row = 0; row < actual_h; row++) {
+        const uint8_t *row_ptr = hw_decode_output_buf_ + (size_t)row * (size_t)aligned_w * 2u;
+        display_->draw_pixels_at(
+            dst_x, dst_y + row, actual_w, 1,
+            row_ptr,
+            esphome::display::COLOR_ORDER_RGB,
+            esphome::display::COLOR_BITNESS_565,
+            rgb565_big_endian_);
+      }
+    }
 
     return true;
   }
 #endif  // REMOTE_WEBVIEW_HW_JPEG
 
-  return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
+  return false;
 }
 
 bool RemoteWebView::decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, const uint8_t *data, size_t len) {
