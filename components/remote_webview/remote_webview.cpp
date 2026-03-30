@@ -324,7 +324,7 @@ void RemoteWebView::process_frame_packet_(const uint8_t *data, size_t len) {
     if (!proto::parse_tile_header(data, len, th, off)) return;
     if (off + th.dlen > len) return;
 
-    if (th.w == 0 || th.h == 0 || th.w > display_width_ || th.h > display_height_) {
+    if (th.w == 0 || th.h == 0 || th.x >= display_width_ || th.y >= display_height_) {
       off += th.dlen;
       continue;
     }
