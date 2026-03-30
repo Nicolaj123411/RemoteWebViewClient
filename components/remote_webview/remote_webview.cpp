@@ -463,7 +463,7 @@ bool RemoteWebView::decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, con
   jd_.setMaxOutputSize(8 * 2048);
   jd_.setPixelType(rgb565_big_endian_ ? RGB565_BIG_ENDIAN : RGB565_LITTLE_ENDIAN);
 
-  const int rc = jd_.decode(dst_x, dst_y, 0);
+  const int rc = jd_.decode(0, 0, 0);
   if (rc == 0) {
     ESP_LOGE(TAG, "decode rc=%d err=%d", rc, jd_.getLastError());
     jd_.close();
@@ -494,13 +494,11 @@ int RemoteWebView::jpeg_draw_cb_(JPEGDRAW *p) {
   if (!sw_decode_buf_) return 0;
 
   for (int row = 0; row < p->iHeight; row++) {
-    const int abs_y = p->y + row;
-    const int rel_y = abs_y - sw_decode_dst_y_;
+    const int rel_y = p->y + row;
     if (rel_y < 0 || rel_y >= sw_decode_buf_h_) continue;
 
     for (int col = 0; col < p->iWidth; col++) {
-      const int abs_x = p->x + col;
-      const int rel_x = abs_x - sw_decode_dst_x_;
+      const int rel_x = p->x + col;
       if (rel_x < 0 || rel_x >= sw_decode_buf_w_) continue;
 
       sw_decode_buf_[rel_y * sw_decode_buf_w_ + rel_x] = p->pPixels[row * p->iWidth + col];
