@@ -57,24 +57,21 @@ void RemoteWebView::setup() {
   }
 
   if (hw_dec_) {
-    const int W = display_->get_width();
-    const int H = display_->get_height();
-    const int aligned_w = (W + 15) & ~15;
-    const int aligned_h = (H + 15) & ~15;
-
+    const int aligned_w = (display_width_  + 15) & ~15;
+    const int aligned_h = (display_height_ + 15) & ~15;
     const size_t max_buffer_size = (size_t)aligned_w * (size_t)aligned_h * 2u;
 
-    jpeg_decode_memory_alloc_cfg_t in_cfg { .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER };
+    jpeg_decode_memory_alloc_cfg_t in_cfg  { .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER  };
     jpeg_decode_memory_alloc_cfg_t out_cfg { .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER };
 
-    hw_decode_input_buf_ = (uint8_t*)jpeg_alloc_decoder_mem((uint32_t)max_buffer_size, &in_cfg, &hw_decode_input_size_);
+    hw_decode_input_buf_  = (uint8_t*)jpeg_alloc_decoder_mem((uint32_t)max_buffer_size, &in_cfg,  &hw_decode_input_size_);
     hw_decode_output_buf_ = (uint8_t*)jpeg_alloc_decoder_mem((uint32_t)max_buffer_size, &out_cfg, &hw_decode_output_size_);
 
     if (!hw_decode_input_buf_ || !hw_decode_output_buf_) {
       ESP_LOGE(TAG, "Failed to allocate HW decoder buffers");
-      if (hw_decode_input_buf_) free(hw_decode_input_buf_);
+      if (hw_decode_input_buf_)  free(hw_decode_input_buf_);
       if (hw_decode_output_buf_) free(hw_decode_output_buf_);
-      hw_decode_input_buf_ = nullptr;
+      hw_decode_input_buf_  = nullptr;
       hw_decode_output_buf_ = nullptr;
       jpeg_del_decoder_engine(hw_dec_);
       hw_dec_ = nullptr;
@@ -194,7 +191,6 @@ void RemoteWebView::ws_event_handler_(void *handler_arg, esp_event_base_t, int32
     case WEBSOCKET_EVENT_CONNECTED:
       if (self_) self_->ws_client_ = e->client;
       ESP_LOGI(TAG, "[ws] connected");
-
       if (self_) self_->last_keepalive_us_ = esp_timer_get_time();
       if (self_ && !self_->url_.empty()) {
         self_->ws_send_open_url_(self_->url_.c_str(), 0);
@@ -385,8 +381,10 @@ bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const
     const int aligned_h = (actual_h + 15) & ~15;
 
     // Ikke-aligned tiles droppes — undgår DMA2D konflikt
-    if (aligned_w != actual_w || aligned_h != actual_h)
+    if (aligned_w != actual_w || aligned_h != actual_h) {
+      ESP_LOGW(TAG, "dropping non-aligned tile: %dx%d", actual_w, actual_h);
       return false;
+    }
 
     const uint32_t out_sz = (uint32_t)aligned_w * (uint32_t)aligned_h * 2u;
     if (out_sz > hw_decode_output_size_ || len > hw_decode_input_size_)
@@ -419,63 +417,9 @@ bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const
 
   return false;
 }
+
 bool RemoteWebView::decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, const uint8_t *data, size_t len) {
-  if (!jd_.openRAM((uint8_t*)data, (int)len, &RemoteWebView::jpeg_draw_cb_s_)) {
-    ESP_LOGE(TAG, "openRAM failed (len=%u) err=%d", (unsigned)len, jd_.getLastError());
-    return false;
-  }
-
-  const int w = jd_.getWidth();
-  const int h = jd_.getHeight();
-
-  // Allokér 64-byte aligned buffer — ESP32-P4 kræver dette for draw_pixels_at
-  const int aligned_w = (w + 15) & ~15;
-  const int aligned_h = (h + 15) & ~15;
-  const size_t buf_sz = (size_t)aligned_w * (size_t)aligned_h * 2u;
-
-  sw_decode_buf_ = (uint16_t*)heap_caps_aligned_alloc(64, buf_sz, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (!sw_decode_buf_)
-    sw_decode_buf_ = (uint16_t*)heap_caps_aligned_alloc(64, buf_sz, MALLOC_CAP_8BIT);
-
-  if (!sw_decode_buf_) {
-    ESP_LOGE(TAG, "sw decode buf alloc failed (%u bytes)", (unsigned)buf_sz);
-    jd_.close();
-    return false;
-  }
-
-  sw_decode_buf_w_ = aligned_w;
-  sw_decode_buf_h_ = aligned_h;
-  sw_decode_dst_x_ = dst_x;
-  sw_decode_dst_y_ = dst_y;
-
-  memset(sw_decode_buf_, 0, buf_sz);
-
-  jd_.setMaxOutputSize(8 * 2048);
-  jd_.setPixelType(rgb565_big_endian_ ? RGB565_BIG_ENDIAN : RGB565_LITTLE_ENDIAN);
-
-  const int rc = jd_.decode(0, 0, 0);
-  if (rc == 0) {
-    ESP_LOGE(TAG, "decode rc=%d err=%d", rc, jd_.getLastError());
-    jd_.close();
-    heap_caps_free(sw_decode_buf_);
-    sw_decode_buf_ = nullptr;
-    return false;
-  }
-  jd_.close();
-
-    // Tegn række for række — springer aligned stride padding over
-  for (int row = 0; row < h; row++) {
-    display_->draw_pixels_at(
-        dst_x, dst_y + row, w, 1,
-        (const uint8_t*)(&sw_decode_buf_[row * aligned_w]),
-        esphome::display::COLOR_ORDER_RGB,
-        esphome::display::COLOR_BITNESS_565,
-        rgb565_big_endian_);
-  }
-
-  heap_caps_free(sw_decode_buf_);
-  sw_decode_buf_ = nullptr;
-  return true;
+  return false; // Ikke brugt på ESP32-P4
 }
 
 int RemoteWebView::jpeg_draw_cb_s_(JPEGDRAW *p) {
@@ -483,27 +427,7 @@ int RemoteWebView::jpeg_draw_cb_s_(JPEGDRAW *p) {
 }
 
 int RemoteWebView::jpeg_draw_cb_(JPEGDRAW *p) {
-  if (!sw_decode_buf_) return 0;
-
-  for (int row = 0; row < p->iHeight; row++) {
-    const int rel_y = p->y + row;
-    if (rel_y < 0 || rel_y >= sw_decode_buf_h_) continue;
-
-    // Kopier hele rækken på én gang med memcpy
-    const int rel_x = p->x;
-    if (rel_x < 0 || rel_x >= sw_decode_buf_w_) continue;
-
-    int copy_w = p->iWidth;
-    if (rel_x + copy_w > sw_decode_buf_w_)
-      copy_w = sw_decode_buf_w_ - rel_x;
-
-    memcpy(
-      &sw_decode_buf_[rel_y * sw_decode_buf_w_ + rel_x],
-      &p->pPixels[row * p->iWidth],
-      copy_w * 2
-    );
-  }
-  return 1;
+  return 0; // Ikke brugt på ESP32-P4
 }
 
 bool RemoteWebView::ws_send_touch_event_(proto::TouchType type, int x, int y, uint8_t pid) {
@@ -578,8 +502,6 @@ void RemoteWebViewTouchListener::update(const touchscreen::TouchPoints_t &pts) {
   for (auto &p : pts) {
     if (p.x < 0 || p.x >= parent_->display_width_ ||
         p.y < 0 || p.y >= parent_->display_height_) {
-      ESP_LOGW(TAG, "touch out of bounds: %d,%d (display %dx%d)",
-               p.x, p.y, parent_->display_width_, parent_->display_height_);
       continue;
     }
     switch (p.state) {
@@ -612,8 +534,6 @@ void RemoteWebViewTouchListener::touch(touchscreen::TouchPoint tp) {
 
   if (tp.x < 0 || tp.x >= parent_->display_width_ ||
       tp.y < 0 || tp.y >= parent_->display_height_) {
-    ESP_LOGW(TAG, "touch out of bounds: %d,%d (display %dx%d)",
-             tp.x, tp.y, parent_->display_width_, parent_->display_height_);
     return;
   }
 
@@ -697,8 +617,11 @@ std::string RemoteWebView::build_ws_uri_() const {
   const std::string id = resolve_device_id_();
   append_q_str_(uri, "id", id.c_str());
 
-  append_q_int_(uri, "w", display_width_);
-  append_q_int_(uri, "h", display_height_);
+  // Rund op til nærmeste multiple af 16 — sikrer aligned JPEG tiles på ESP32-P4
+  const int aligned_w = (display_width_  + 15) & ~15;
+  const int aligned_h = (display_height_ + 15) & ~15;
+  append_q_int_(uri, "w", aligned_w);
+  append_q_int_(uri, "h", aligned_h);
 
   append_q_int_(uri,   "r",    rotation_);
   append_q_int_(uri,   "ts",   tile_size_);
