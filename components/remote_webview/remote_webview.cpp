@@ -374,28 +374,23 @@ bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const
   if (!data || !len) return false;
 
 #if REMOTE_WEBVIEW_HW_JPEG
-  // Brug kun HW decoder til perfekt aligned tiles (begge dimensioner multiple af 16)
   if (hw_dec_ && hw_decode_input_buf_ && hw_decode_output_buf_) {
     jpeg_decode_picture_info_t hdr{};
-    if (jpeg_decoder_get_info(data, (uint32_t)len, &hdr) != ESP_OK || !hdr.width || !hdr.height) {
-      return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
-    }
+    if (jpeg_decoder_get_info(data, (uint32_t)len, &hdr) != ESP_OK || !hdr.width || !hdr.height)
+      return false;
 
     const int actual_w = (int)hdr.width;
     const int actual_h = (int)hdr.height;
     const int aligned_w = (actual_w + 15) & ~15;
     const int aligned_h = (actual_h + 15) & ~15;
 
-    // Ikke-aligned tiles: brug software decoder for at undgå DMA2D konflikt
-    if (aligned_w != actual_w || aligned_h != actual_h) {
-      return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
-    }
+    // Ikke-aligned tiles droppes — undgår DMA2D konflikt
+    if (aligned_w != actual_w || aligned_h != actual_h)
+      return false;
 
     const uint32_t out_sz = (uint32_t)aligned_w * (uint32_t)aligned_h * 2u;
-    if (out_sz > hw_decode_output_size_ || len > hw_decode_input_size_) {
-      ESP_LOGW(TAG, "tile too large for HW decoder buffers");
-      return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
-    }
+    if (out_sz > hw_decode_output_size_ || len > hw_decode_input_size_)
+      return false;
 
     jpeg_decode_cfg_t jcfg{};
     jcfg.output_format = JPEG_DECODE_OUT_FORMAT_RGB565;
@@ -409,11 +404,8 @@ bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const
                                         hw_decode_input_buf_, (uint32_t)len,
                                         hw_decode_output_buf_, (uint32_t)hw_decode_output_size_,
                                         &written);
-
-    if (dr != ESP_OK) {
-      ESP_LOGW(TAG, "HW decode failed (err=%d), falling back to SW", dr);
-      return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
-    }
+    if (dr != ESP_OK)
+      return false;
 
     display_->draw_pixels_at(
         dst_x, dst_y, actual_w, actual_h,
@@ -421,14 +413,12 @@ bool RemoteWebView::decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const
         esphome::display::COLOR_ORDER_RGB,
         esphome::display::COLOR_BITNESS_565,
         rgb565_big_endian_);
-
     return true;
   }
-#endif  // REMOTE_WEBVIEW_HW_JPEG
+#endif
 
-  return decode_jpeg_tile_software_(dst_x, dst_y, data, len);
+  return false;
 }
-
 bool RemoteWebView::decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, const uint8_t *data, size_t len) {
   if (!jd_.openRAM((uint8_t*)data, (int)len, &RemoteWebView::jpeg_draw_cb_s_)) {
     ESP_LOGE(TAG, "openRAM failed (len=%u) err=%d", (unsigned)len, jd_.getLastError());
