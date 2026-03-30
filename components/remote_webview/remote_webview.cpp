@@ -497,12 +497,19 @@ int RemoteWebView::jpeg_draw_cb_(JPEGDRAW *p) {
     const int rel_y = p->y + row;
     if (rel_y < 0 || rel_y >= sw_decode_buf_h_) continue;
 
-    for (int col = 0; col < p->iWidth; col++) {
-      const int rel_x = p->x + col;
-      if (rel_x < 0 || rel_x >= sw_decode_buf_w_) continue;
+    // Kopier hele rækken på én gang med memcpy
+    const int rel_x = p->x;
+    if (rel_x < 0 || rel_x >= sw_decode_buf_w_) continue;
 
-      sw_decode_buf_[rel_y * sw_decode_buf_w_ + rel_x] = p->pPixels[row * p->iWidth + col];
-    }
+    int copy_w = p->iWidth;
+    if (rel_x + copy_w > sw_decode_buf_w_)
+      copy_w = sw_decode_buf_w_ - rel_x;
+
+    memcpy(
+      &sw_decode_buf_[rel_y * sw_decode_buf_w_ + rel_x],
+      &p->pPixels[row * p->iWidth],
+      copy_w * 2
+    );
   }
   return 1;
 }
