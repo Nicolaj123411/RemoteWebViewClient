@@ -57,7 +57,7 @@ class RemoteWebView : public Component {
   struct WsMsg {
     uint8_t *buf{nullptr};
     size_t   len{0};
-    void    *client{nullptr}; // opaque esp_websocket_client_handle_t
+    void    *client{nullptr};
   };
   struct WsReasm {
     uint8_t *buf{nullptr};
@@ -133,6 +133,13 @@ class RemoteWebView : public Component {
   static int jpeg_draw_cb_s_(JPEGDRAW *p);
   int jpeg_draw_cb_(JPEGDRAW *p);
   JPEGDEC jd_;
+
+  // SW decode scratch buffer (cache-aligned for ESP32-P4)
+  uint16_t *sw_decode_buf_{nullptr};
+  int       sw_decode_buf_w_{0};
+  int       sw_decode_buf_h_{0};
+  int16_t   sw_decode_dst_x_{0};
+  int16_t   sw_decode_dst_y_{0};
 
   bool ws_send_touch_event_(proto::TouchType type, int x, int y, uint8_t pid);
   bool ws_send_keepalive_();
